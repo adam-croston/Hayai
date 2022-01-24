@@ -1,0 +1,271 @@
+#ifdef GL_ES
+precision mediump float;
+precision mediump int;
+#endif
+
+//uniform float timeS;
+//uniform vec2 mouseScreenPos0To1;
+uniform vec2 screenRes;
+uniform vec2 warpVertAScreenPos0To1;
+uniform vec2 warpVertBScreenPos0To1;
+uniform vec2 warpVertDScreenPos0To1;
+uniform vec2 warpVertCScreenPos0To1;
+uniform vec2 warpPerspXY;
+
+uniform sampler2D texture;
+
+varying vec4 vertColor;
+varying vec4 vertTexCoord;
+
+//http://stackoverflow.com/questions/23920976/bilinear-interpolation-with-non-aligned-input-points/23938113#23938113
+
+/*
+//http://www.wyrmtale.com/blog/2013/115/2d-line-intersection-in-c
+bool lineIntersectionPoint(in vec2 ps1, in vec2 pe1, in vec2 ps2, in vec2 pe2, out vec2 point){
+	// Get A,B,C of first line - points : ps1 to pe1
+	float A1 = pe1.y-ps1.y;
+	float B1 = ps1.x-pe1.x;
+	float C1 = A1*ps1.x+B1*ps1.y;
+
+	// Get A,B,C of second line - points : ps2 to pe2
+	float A2 = pe2.y-ps2.y;
+	float B2 = ps2.x-pe2.x;
+	float C2 = A2*ps2.x+B2*ps2.y;
+
+	// Get delta and check if the lines are parallel.
+	float delta = A1*B2 - A2*B1;
+	if(delta == 0){
+		return false;//Lines are parallel
+	}
+
+	// Now return the vec2 intersection point.
+	point = new vec2((B2*C1 - B1*C2)/delta, (A1*C2 - A2*C1)/delta);
+	return true;
+}
+http://ryoushin.com/cmerighi/en-US/2006-09-30_21/Quadrilateral_Distortion_Algorithm
+vec2 invBilinear3( in vec2 p, in vec2 a, in vec2 b, in vec2 c, in vec2 d ){
+
+	// O » intersecting the lines through A' and B' and through D' and C'.
+	vec2 O = new vec2(0.0, 0.0);
+	bool pointOExists = lineIntersectionPoint(a, b, d, c, O);
+
+	// N » intersecting the lines through A' and D' and through B' and C'.
+	vec2 N = new vec2(0.0, 0.0);
+	bool pointNExists = lineIntersectionPoint(a, d, b, c, N);
+	
+	// L » intersecting the line through O and P and the line through A' and D'.
+	bool pointLExists = 
+	// M » intersecting the line through O and P and the line through B' and C'.
+	// J » intersecting the line through N and P and the line through A' and B'.
+	// K » intersecting the line through N and P and the line through C' and D'.
+	
+	// dJP » distance between J and P.
+	// dKP » distance between K and P.
+	// dLP » distance between L and P.
+	// dMP » distance between M and P.
+	
+	// Now, to get the coordinates of P0 = (x0, y0) is necessary to apply the following proportion:
+	// NOTE: let us suppose that the stating rectangle is the bounding quadrilateral of the distorted one
+	// (the passages to bring the point P0 to the "effectively" starting status are trivial).
+	// In the Cartesian orthogonal monometric coordinate system Axy (see figure 3), we have:
+	
+	// yP0 = yD * dJP / (dJP + dKP)
+	// xP0 = xB * dLP / (dLP + dMP)
+
+    return vec2( 0.5, 0.5 );
+}
+*/
+
+//http://stackoverflow.com/questions/23920976/bilinear-interpolation-with-non-aligned-input-points
+vec2 invBilinear2(in vec2 point, in vec2 p1, in vec2 p3, in vec2 p4, in vec2 p2){
+	float a = -p1.x + p3.x;
+	float b = -p1.x + p2.x;
+	float c = p1.x - p2.x - p3.x + p4.x;
+	float d = point.x - p1.x;
+	float e = -p1.y + p3.y;
+	float f = -p1.y + p2.y;
+	float g = p1.y - p2.y - p3.y + p4.y;
+	float h = point.y - p1.y;
+	
+	float deno1 = (2.0*c*e - 2.0*a*g);
+	if(deno1 == 0.0){return vec2( 0.1, 0.1 );}
+	float deno2 = (2.0*c*f - 2.0*b*g);
+	if(deno2 == 0.0){return vec2( 0.1, 0.1 );}
+	float k = (b*e - a*f + d*g - c*h);
+	float discriminator = (-4.0*(c*e - a*g)*(d*f - b*h) + (k*k));
+	if(discriminator < 0.0){return vec2( 0.1, 0.1 );}
+	
+	float alpha =	-(b*e - a*f + d*g - c*h + sqrt(discriminator))/deno1;  
+	float beta =	 (b*e - a*f - d*g + c*h + sqrt(discriminator))/deno2;
+
+    return vec2( alpha, beta );
+}
+
+
+// Get the distance to a line from a point.
+float Line(in vec2 v1, in vec2 v2, in vec2 pt){
+	vec2 pa = pt - v1;
+	vec2 ba = v2 - v1;
+	float h = clamp(dot(pa,ba) / dot(ba,ba), 0.0, 1.0);
+	return length(pa - ba*h);
+}
+
+// Determine the side of the line of a point.
+// Leftward is positive and rightward is negative.
+float Side(in vec2 v1, in vec2 v2, in vec2 pt){
+    return (pt.x - v2.x) * (v1.y - v2.y) - (v1.x - v2.x) * (pt.y - v2.y);
+}
+
+// Determine if a point is inside a triangle.
+// The triangle should be defined in anti-clockwise order.
+bool PointInTriangle (in vec2 v1, in vec2 v2, in vec2 v3, in vec2 pt){
+    bool b1 = (Side(v1, v2, pt) > 0.0);
+    bool b2 = (Side(v2, v3, pt) > 0.0);
+    bool b3 = (Side(v3, v1, pt) > 0.0);
+
+    return ((b1 == b2) && (b2 == b3));
+}
+
+float snoise(in vec2 co){
+    return fract(sin(dot(co.xy ,vec2(12.9898,78.233))) * 43758.5453);
+}
+
+// http://www.iquilezles.org/www/articles/ibilinear/ibilinear.htm
+float cross( in vec2 a, in vec2 b ) { return a.x*b.y - a.y*b.x; }
+/*
+vec2 invBilinear( in vec2 p, in vec2 a, in vec2 b, in vec2 c, in vec2 d ){
+    vec2 e = b-a;
+    vec2 f = d-a;
+    vec2 g = a-b+c-d;
+    vec2 h = p-a;
+
+	float k0 = cross( h, e );
+    float k1 = cross( e, f ) + cross( h, g );
+    float k2 = cross( g, f );
+	//if(k2 < 0.0)
+	if(k2 < 0.0001 && k2 > -0.0001){// What to actually do in this case?
+		if(k1 != 0.0){
+			
+			float v1 = -k0/k1;
+			float u1_den = (e.x + g.x*v1);
+			if(u1_den < 0.0001 && u1_den > -0.0001){return vec2(0.52, 0.52);}// What to actually do in this case?
+			float u1 = (h.x - f.x*v1)/u1_den;
+			
+			float u = u1;
+			float v = v1;
+			if( v<0.0 || v>1.0 || u<0.0 || u>1.0 ) { u=0.0; v=0.0; }
+
+			return vec2( u, v );
+			
+		}else{
+			return vec2(0.25, 0.25);// What to actually do in this case?
+		}
+	}
+	
+    float w = k1*k1 - 4.0*k0*k2;
+    if(w < 0.00){return vec2(0.35, 0.35);}
+    w = sqrt( w );
+
+    float v1 = (-k1 - w)/(2.0*k2);
+	float u1_den = (e.x + g.x*v1);
+	if(u1_den < 0.0001 && u1_den > -0.0001){return vec2(0.50, 0.50);}// What to actually do in this case?
+    float u1 = (h.x - f.x*v1)/u1_den;
+
+    float v2 = (-k1 + w)/(2.0*k2);
+	float u2_den =(e.x + g.x*v2);
+	if(u2_den < 0.0001 && u2_den > -0.0001){return vec2(0.75, 0.75);}// What to actually do in this case?
+    float u2 = (h.x - f.x*v2)/u2_den;
+
+    float u = u1;
+    float v = v1;
+    if( v<0.0 || v>1.0 || u<0.0 || u>1.0 ) { u=u2;   v=v2;}
+	if( v<0.0 || v>1.0 || u<0.0 || u>1.0 ) { u=0.99; v=0.99; }// What to actually do in this case?
+
+    return vec2( u, v );
+}*/
+vec2 invBilinear( in vec2 p, in vec2 a, in vec2 b, in vec2 c, in vec2 d )
+{
+    vec2 e = b-a;
+    vec2 f = d-a;
+    vec2 g = a-b+c-d;
+    vec2 h = p-a;
+
+    float k2 = cross( g, f );
+    float k1 = cross( e, f ) + cross( h, g );
+    float k0 = cross( h, e );
+
+    float w = k1*k1 - 4.0*k0*k2;
+    if( w<0.0 ) return vec2(-1.0);
+    w = sqrt( w );
+
+    float v1 = (-k1 - w)/(2.0*k2);
+    float u1 = (h.x - f.x*v1)/(e.x + g.x*v1);
+
+    float v2 = (-k1 + w)/(2.0*k2);
+    float u2 = (h.x - f.x*v2)/(e.x + g.x*v2);
+
+    float u = u1;
+    float v = v1;
+
+    if( v<0.0 || v>1.0 || u<0.0 || u>1.0 ) { u=u2;   v=v2;   }
+    if( v<0.0 || v>1.0 || u<0.0 || u>1.0 ) { u=-1.0; v=-1.0; }
+
+    return vec2( u, v );
+}
+
+void main(){
+    // Set up our quad in Neg1To1 space.
+    vec2 warpVertAScreenPosNeg1To1 = ((warpVertAScreenPos0To1 * 2.0) - 1.0);
+    vec2 warpVertBScreenPosNeg1To1 = ((warpVertBScreenPos0To1 * 2.0) - 1.0);
+    vec2 warpVertCScreenPosNeg1To1 = ((warpVertCScreenPos0To1 * 2.0) - 1.0);	
+    vec2 warpVertDScreenPosNeg1To1 = ((warpVertDScreenPos0To1 * 2.0) - 1.0);
+	
+	// Determine the fragment position in Neg1To1 space. 
+	vec2 screenPos0To1 = clamp((gl_FragCoord.xy / screenRes), 0.0, 1.0);  
+	screenPos0To1.y = 1.0 - screenPos0To1.y;
+	vec2 screenPosNeg1To1 = clamp(((screenPos0To1 * 2.0) - 1.0), -1.0, 1.0);
+	
+	// Determine the color to use for this fragment.
+    
+    // Start with a simple radial falloff.
+	vec3 col = clamp(vec3(0.5,0.85,0.9)*(1.0-0.4*length(screenPosNeg1To1)), 0.0, 1.0);
+    
+    // If inside either triangle use the texture color.
+    bool inTri1 = PointInTriangle (warpVertAScreenPosNeg1To1, warpVertCScreenPosNeg1To1, warpVertBScreenPosNeg1To1, screenPosNeg1To1);
+    bool inTri2 = PointInTriangle (warpVertAScreenPosNeg1To1, warpVertCScreenPosNeg1To1, warpVertDScreenPosNeg1To1, screenPosNeg1To1);
+    if(inTri1 || inTri2){
+        // Determine the fragment position in UV space of the quad. 
+        vec2 posQUV = invBilinear(screenPosNeg1To1, warpVertAScreenPosNeg1To1, warpVertBScreenPosNeg1To1, warpVertCScreenPosNeg1To1, warpVertDScreenPosNeg1To1);
+        //posQUV.y = 1.0 - posQUV.y; // Flip for video?
+		
+        // Perspective correct equation.
+        // From http://en.wikipedia.org/wiki/Texture_mapping#Perspective_correctness
+        // The equation is identical for U and V, so we only show the U one below.
+        //ualpha = (((1-alpha)*(u0/z0)) + ((alpha)*(u1/z1))) /;
+        //         (((1-alpha)*(1.0/z0)) + ((alpha)*(1.0/z1)));
+        
+        // Abuse the equation above to apply as a simple user
+        // controllable warping amount.
+        // We do this by pretending the z value at u0 is just one and
+        // giving the user control of the z value at u1.
+        // We use vector ops to do this on U and V at the same timeS.
+        vec2 zWarpUV = warpPerspXY;//vec2(0.5, 0.5);
+        vec2 posQUVWarped = (((posQUV)*(1.0/zWarpUV))) / (((vec2(1.0, 1.0)-posQUV)) + ((posQUV)*(1.0/zWarpUV)));        
+        
+		vec3 texel = texture2D(texture, posQUVWarped).rgb;
+		//vec3 texel = texture2D(texture, posQUV).rgb;
+        col = texel;
+    }else{
+		// If close to any edge draw it in a solid color.
+		float minDistToEdge = 1e20;	
+		minDistToEdge = min(minDistToEdge, Line(warpVertAScreenPosNeg1To1, warpVertBScreenPosNeg1To1, screenPosNeg1To1));
+		minDistToEdge = min(minDistToEdge, Line(warpVertBScreenPosNeg1To1, warpVertCScreenPosNeg1To1, screenPosNeg1To1));
+		minDistToEdge = min(minDistToEdge, Line(warpVertCScreenPosNeg1To1, warpVertDScreenPosNeg1To1, screenPosNeg1To1));
+		minDistToEdge = min(minDistToEdge, Line(warpVertDScreenPosNeg1To1, warpVertAScreenPosNeg1To1, screenPosNeg1To1));    
+		if(minDistToEdge < 0.005){col = vec3(0.0,0.0,0.0);}// black 
+		if(minDistToEdge < 0.015){col = vec3(1.0,0.6,0.0);}// orange
+	}
+	
+    // Set the output color.
+	gl_FragColor = vec4(col, 1.0);	
+}
